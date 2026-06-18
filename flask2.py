@@ -1,0 +1,101 @@
+from flask import Flask, request, jsonify, render_template
+from flask_cors import CORS
+from datetime import datetime
+import os
+import json
+import logging
+import requests
+
+# =================== CONFIG ===================
+app = Flask(__name__)
+CORS(app)
+
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN"  # Replace with your bot token
+TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"  # Replace with your chat ID
+
+# Log directory and files
+LOG_DIR = os.path.join(os.environ['USERPROFILE'], 'HoneyfileLogs')
+os.makedirs(LOG_DIR, exist_ok=True)
+LOG_FILE = os.path.join(LOG_DIR, 'siem_logs.json')
+
+# Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, 'app.log')),
+        logging.StreamHandler()
+    ]
+)
+
+# =================== FUNCTIONS ===================
+def send_telegram_alert(log_data):
+    try:
+        message = f"\ud83d\udea8 Honeyfile Event Detected\n\n" \
+                  f"Time: {log_data.get('timestamp', 'unknown')}\n" \
+                  f"User: {log_data.get('user', 'N/A')}\n" \
+                  f"Host: {log_data.get('host', 'N/A')}\n" \
+                  f"Event: {log_data.get('event_type', 'N/A')}\n" \
+                  f"File: {log_data.get('file', 'N/A')}"
+
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': message
+        }
+        response = requests.post(url, json=payload)
+        if response.status_code != 200:
+            logging.warning(f"Telegram alert failed: {response.text}")
+    except Exception as e:
+        logging.error(f"Error sending Telegram alert: {str(e)}")
+
+# =================== ROUTES ===================
+@app.route("/siem-log", methods=["POST"])
+def siem_log():
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        data["received_at"] = datetime.utcnow().isoformat()
+
+        with open(LOG_FILE, 'a') as f:
+            f.write(json.dumps(data) + "\n")
+
+        logging.info(f"New alert: {data}")
+
+        # Send Telegram Notification
+        send_telegram_alert(data)
+
+        return jsonify({"status": "received"}), 200
+
+    except Exception as e:
+        logging.error(f"Error processing log: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/logs")
+def get_logs():
+    try:
+        if not os.path.exists(LOG_FILE):
+            return jsonify([])
+
+        with open(LOG_FILE, 'r') as f:
+            logs = [json.loads(line) for line in f if line.strip()]
+
+        return jsonify(logs[::-1])  # Newest first
+
+    except Exception as e:
+        logging.error(f"Error reading logs: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/")
+def dashboard():
+    return render_template("index.html")
+
+# =================== MAIN ===================
+if __name__ == "__main__":
+    logging.info(f"Starting SIEM server. Logs stored in: {LOG_DIR}")
+    app.run(host="0.0.0.0", port=5000, debug=True)
