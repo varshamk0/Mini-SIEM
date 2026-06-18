@@ -192,7 +192,9 @@ mini-siem/
 ## Author
 
 **Varsha M Kumar**
+
 B.Tech Computer Science Engineering (Honours in Cybersecurity)
+
 Christ (Deemed to be University), Bengaluru
 
 ---
